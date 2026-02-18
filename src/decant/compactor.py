@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import uuid as uuid_mod
-from datetime import datetime, timezone
 from pathlib import Path
 
 import anthropic
@@ -12,7 +9,6 @@ import anthropic
 from .auth import CLAUDE_CODE_SYSTEM_PROMPT
 from .models import (
     BOUNDARY_TRANSCRIPT_MAX_CHARS,
-    MODELS,
     SUMMARY_MAX_TOKENS,
     SUMMARY_TRANSCRIPT_MAX_CHARS,
 )
@@ -20,7 +16,6 @@ from .session import (
     Exchange,
     collect_tail_uuids,
     extract_exchanges,
-    get_session_metadata,
     load_messages,
     save_messages,
     walk_main_chain,
@@ -235,20 +230,17 @@ def summarize_head(
     return response.content[0].text.strip()
 
 
-def build_summary_message(summary_text: str, metadata: dict) -> dict:
-    """Construct a summary JSONL message that acts as the new root."""
+def build_summary_record(summary_text: str, leaf_uuid: str) -> dict:
+    """Construct a summary JSONL record matching Claude Code's native format.
+
+    Summary records are metadata blobs — NOT part of the parentUuid tree.
+    They have exactly three fields: type, summary, leafUuid.
+    The leafUuid points to the last message of the section that was summarized.
+    """
     return {
         "type": "summary",
-        "uuid": str(uuid_mod.uuid4()),
-        "parentUuid": None,
-        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "sessionId": metadata.get("sessionId", ""),
-        "isSidechain": False,
-        "userType": metadata.get("userType", "external"),
-        "cwd": metadata.get("cwd", ""),
-        "version": metadata.get("version", ""),
-        "gitBranch": metadata.get("gitBranch", ""),
         "summary": summary_text,
+        "leafUuid": leaf_uuid,
     }
 
 
@@ -348,21 +340,30 @@ def compact(
             f"This should not happen. Backup at: {backup_path}"
         )
 
-    # Build the summary message
-    metadata = get_session_metadata(messages)
-    summary_msg = build_summary_message(summary_text, metadata)
+    # Find the leaf UUID of the head section (the message just before the boundary)
+    # This is what the summary record's leafUuid should point to
+    chain = walk_main_chain(messages)
+    head_leaf_uuid = ""
+    for msg in chain:
+        if msg.get("uuid") == boundary_uuid:
+            break
+        head_leaf_uuid = msg.get("uuid", "")
 
-    # Reparent the boundary message to point to the summary
+    # Build the summary record (metadata blob, not a tree node)
+    summary_record = build_summary_record(summary_text, head_leaf_uuid)
+
+    # Reparent the boundary message to null — it becomes the new tree root
     for msg in messages:
         if msg.get("uuid") == boundary_uuid:
-            msg["parentUuid"] = summary_msg["uuid"]
+            msg["parentUuid"] = None
             break
 
     # Structural message types that should be preserved even without UUID in tail
     STRUCTURAL_TYPES = {"file-history-snapshot", "queue-operation", "summary"}
 
-    # Build new message list: summary + all tail messages (in original order)
-    new_messages = [summary_msg]
+    # Build new message list: summary record + all tail messages (in original order)
+    # Also preserve any existing summary records from prior compactions
+    new_messages = [summary_record]
     for msg in messages:
         uid = msg.get("uuid")
         msg_type = msg.get("type", "")
