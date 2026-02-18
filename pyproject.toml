@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "decant"
+version = "0.1.0"
+description = "Selective offline compaction for Claude Code sessions"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.40.0",
+]
+
+[project.optional-dependencies]
+strip = ["cozempic"]
+
+[project.scripts]
+decant = "decant.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/decant"]
