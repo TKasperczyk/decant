@@ -23,12 +23,6 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-Optional noise stripping (removes thinking blocks, duplicate file reads, progress ticks before summarization):
-
-```bash
-pip install cozempic
-```
-
 ## Usage
 
 ### List sessions
@@ -66,7 +60,7 @@ decant compact <session-id> --last 10 --model opus
 ### Options
 
 - `--model haiku|sonnet|opus` - which model to use for boundary finding and summarization (default: haiku)
-- `--strip` - run [cozempic](https://github.com/Ruya-AI/cozempic) noise stripping before compaction
+- `--strip` - remove noise (progress ticks, thinking blocks, metadata, oversized tool output) before compaction
 - `--dry-run` - preview what would happen without touching anything
 - `--no-backup` - skip creating a `.bak` file (not recommended)
 
@@ -76,7 +70,7 @@ Session IDs can be the full UUID, a prefix (minimum 6 chars), or a direct path t
 
 1. Parses the session JSONL and reconstructs the conversation tree via `parentUuid` chains
 2. Finds the boundary message, either by asking an LLM to locate a topic, or by counting user turns from the end
-3. Optionally strips noise (thinking blocks, progress ticks, stale file reads) via cozempic
+3. Optionally strips noise (progress ticks, thinking blocks, metadata, oversized tool output)
 4. Sends the head section to the LLM for summarization
 5. Writes a summary record matching Claude Code's native format (`{type, summary, leafUuid}`)
 6. Sets the boundary message as the new tree root (`parentUuid: null`)

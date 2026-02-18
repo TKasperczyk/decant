@@ -44,6 +44,30 @@ def cmd_compact(args: argparse.Namespace) -> None:
     messages = load_messages(session_path)
     print(f"Messages: {len(messages)}")
 
+    # Create backup BEFORE any modifications (strip or compact)
+    backup_path = None
+    if not args.no_backup and not args.dry_run:
+        from datetime import datetime
+        import shutil
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = session_path.with_suffix(f".{ts}.jsonl.bak")
+        shutil.copy2(session_path, backup_path)
+
+    # Strip noise before boundary finding and summarization
+    if args.strip and not args.dry_run:
+        from .compactor import run_strip
+        print("\nStripping noise...")
+        messages, strip_stats = run_strip(messages)
+        saved_kb = strip_stats["saved_bytes"] / 1024
+        print(f"  Removed {strip_stats['removed_messages']} messages, "
+              f"saved {saved_kb:.1f} KB ({strip_stats['pct']:.1f}%)")
+        for name, saved in strip_stats["breakdown"].items():
+            if saved > 0:
+                print(f"    {name}: {saved / 1024:.1f} KB")
+        # Write stripped messages back so compact() reads clean data
+        from .session import save_messages
+        save_messages(session_path, messages, backup=False)
+
     # Find boundary
     try:
         client = None
@@ -105,8 +129,7 @@ def cmd_compact(args: argparse.Namespace) -> None:
                 session_path,
                 boundary_uuid,
                 summary,
-                strip=args.strip,
-                backup=not args.no_backup,
+                backup=False,  # Already created above
             )
 
             print(f"\nDone.")
@@ -114,8 +137,8 @@ def cmd_compact(args: argparse.Namespace) -> None:
             saved_mb = stats["saved_bytes"] / (1024 * 1024)
             pct = (stats["saved_bytes"] / stats["original_bytes"] * 100) if stats["original_bytes"] > 0 else 0
             print(f"  Size: {stats['original_bytes'] / (1024*1024):.2f} MB -> {stats['final_bytes'] / (1024*1024):.2f} MB ({saved_mb:.2f} MB saved, {pct:.1f}%)")
-            if stats["backup_path"]:
-                print(f"  Backup: {stats['backup_path']}")
+            if backup_path:
+                print(f"  Backup: {backup_path}")
         else:
             print("\n[DRY RUN] Would summarize and compact here.")
             print(f"  Boundary UUID: {boundary_uuid}")
@@ -202,7 +225,7 @@ def main() -> None:
     p_compact.add_argument("--model", "-m", choices=list(MODELS.keys()), default=DEFAULT_MODEL,
                            help=f"Model for summarization (default: {DEFAULT_MODEL})")
     p_compact.add_argument("--strip", "-s", action="store_true",
-                           help="Run cozempic noise stripping before compaction")
+                           help="Strip noise (progress ticks, thinking blocks, metadata, oversized tool output) before compaction")
     p_compact.add_argument("--dry-run", "-n", action="store_true",
                            help="Preview what would be compacted without making changes")
     p_compact.add_argument("--no-backup", action="store_true",

@@ -11,9 +11,6 @@ dependencies = [
     "anthropic>=0.40.0",
 ]
 
-[project.optional-dependencies]
-strip = ["cozempic"]
-
 [project.scripts]
 decant = "decant.cli:main"
 

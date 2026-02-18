@@ -244,51 +244,13 @@ def build_summary_record(summary_text: str, leaf_uuid: str) -> dict:
     }
 
 
-def run_strip(session_path: Path) -> None:
-    """Run Cozempic noise stripping as a pre-step.
+def run_strip(messages: list[dict]) -> tuple[list[dict], dict]:
+    """Run native noise stripping on messages in memory.
 
-    Attempts to import cozempic, falls back to subprocess.
+    Returns (stripped_messages, stats).
     """
-    try:
-        from cozempic.session import load_messages as coz_load, save_messages as coz_save
-        from cozempic.executor import run_prescription
-        from cozempic.registry import PRESCRIPTIONS
-
-        messages = coz_load(session_path)
-        strategy_names = PRESCRIPTIONS["standard"]
-        new_messages, results = run_prescription(messages, strategy_names, {"thinking_mode": "remove"})
-
-        original_bytes = sum(b for _, _, b in messages)
-        final_bytes = sum(b for _, _, b in new_messages)
-        savings = original_bytes - final_bytes
-        pct = (savings / original_bytes * 100) if original_bytes > 0 else 0
-
-        coz_save(session_path, new_messages, create_backup=False)
-        print(f"  Stripped {savings:,} bytes ({pct:.1f}%) via cozempic")
-        return
-    except ImportError:
-        pass
-
-    # Fall back to subprocess
-    import subprocess
-    try:
-        result = subprocess.run(
-            ["cozempic", "treat", str(session_path), "-rx", "standard", "--execute"],
-            capture_output=True, text=True, timeout=60,
-        )
-        if result.returncode == 0:
-            print(f"  Stripped via cozempic (subprocess)")
-            if result.stdout:
-                # Print last line which usually has the summary
-                for line in result.stdout.strip().split("\n")[-3:]:
-                    print(f"    {line}")
-        else:
-            print(f"  Warning: cozempic failed: {result.stderr[:200]}")
-    except FileNotFoundError:
-        print("  Warning: cozempic not found. Install with: pip install cozempic")
-        print("  Skipping noise stripping.")
-    except subprocess.TimeoutExpired:
-        print("  Warning: cozempic timed out after 60s. Skipping.")
+    from .strip import strip_messages
+    return strip_messages(messages)
 
 
 def compact(
@@ -296,7 +258,6 @@ def compact(
     boundary_uuid: str,
     summary_text: str,
     *,
-    strip: bool = False,
     backup: bool = True,
 ) -> dict:
     """Perform the full compaction: splice summary + tail into the session file.
@@ -314,11 +275,6 @@ def compact(
         backup_path = session_path.with_suffix(f".{ts}.jsonl.bak")
         shutil.copy2(session_path, backup_path)
 
-    if strip:
-        print("  Running noise stripping...")
-        run_strip(session_path)
-
-    # Reload messages (may have been modified by strip)
     messages = load_messages(session_path)
     original_count = len(messages)
 
@@ -327,7 +283,7 @@ def compact(
     if boundary_uuid not in all_uuids:
         raise RuntimeError(
             f"Boundary UUID {boundary_uuid} not found in session after processing. "
-            f"This can happen if cozempic removed the boundary message. "
+            f"This can happen if noise stripping removed the boundary message. "
             f"Backup at: {backup_path}"
         )
 
