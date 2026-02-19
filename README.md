@@ -11,7 +11,7 @@
 
 ---
 
-Selective offline compaction for Claude Code sessions. You choose a split point — by topic or by count — and decant summarizes everything before it while keeping the rest intact. The output matches Claude Code's native format, so `claude --resume` just works.
+Selective offline compaction for Claude Code sessions. You choose a split point - by topic or by count - and decant summarizes everything before it while keeping the rest intact. The output matches Claude Code's native format, so `claude --resume` just works.
 
 Unlike the built-in compaction, which summarizes the entire session, decant lets you preserve recent context and only compress the old parts. Pick a topic ("keep everything about the API refactor") or a count ("keep the last 5 exchanges") and it handles the rest.
 
