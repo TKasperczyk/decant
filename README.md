@@ -1,14 +1,15 @@
-```
-     _                      _
-  __| | ___  ___ __ _ _ __ | |_
- / _` |/ _ \/ __/ _` | '_ \| __|
-| (_| |  __/ (_| (_| | | | | |_
- \__,_|\___|\___\__,_|_| |_|\__|
-```
+<p align="center">
+  <img src="logo.svg" alt="decant" width="480"/>
+</p>
 
-# decant
+<p align="center">
+  <img src="https://img.shields.io/badge/version-0.1.0-7c3aed?style=flat-square" alt="Version 0.1.0">
+  <a href="https://github.com/TKasperczyk/decant"><img src="https://img.shields.io/github/stars/TKasperczyk/decant?style=flat-square&color=a78bfa" alt="Stars"></a>
+  <img src="https://img.shields.io/badge/python-%E2%89%A53.10-7c3aed?style=flat-square" alt="Python 3.10+">
+  <a href="https://github.com/TKasperczyk/decant/blob/main/LICENSE"><img src="https://img.shields.io/github/license/TKasperczyk/decant?style=flat-square&color=6d28d9" alt="License"></a>
+</p>
 
-Selective offline compaction for Claude Code sessions.
+---
 
 Claude Code sessions accumulate context over time: tool calls, file reads, thinking blocks, progress ticks. When a session gets bloated, the built-in compaction summarizes everything. But sometimes you want to keep the recent work intact and only summarize the old stuff. That's what decant does.
 

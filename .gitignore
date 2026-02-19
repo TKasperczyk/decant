@@ -10,3 +10,5 @@ build/
 venv/
 .env
 *.bak
+AGENTS.md
+CLAUDE.md
