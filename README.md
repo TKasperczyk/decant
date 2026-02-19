@@ -11,14 +11,15 @@
 
 ---
 
-Claude Code sessions accumulate context over time: tool calls, file reads, thinking blocks, progress ticks. When a session gets bloated, the built-in compaction summarizes everything. But sometimes you want to keep the recent work intact and only summarize the old stuff. That's what decant does.
+Selective offline compaction for Claude Code sessions. You choose a split point — by topic or by count — and decant summarizes everything before it while keeping the rest intact. The output matches Claude Code's native format, so `claude --resume` just works.
 
-You pick a point in the conversation, either by topic ("keep everything about the API refactor") or by count ("keep the last 5 exchanges"), and decant summarizes everything before that point, splices the summary in, and preserves the rest. The output matches Claude Code's native compaction format, so `claude --resume` works normally.
+Unlike the built-in compaction, which summarizes the entire session, decant lets you preserve recent context and only compress the old parts. Pick a topic ("keep everything about the API refactor") or a count ("keep the last 5 exchanges") and it handles the rest.
 
 ## Install
 
 ```bash
-cd ~/Programming/decant
+git clone https://github.com/TKasperczyk/decant.git
+cd decant
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
@@ -86,7 +87,6 @@ Decant needs Anthropic API access for the LLM calls. It checks these in order:
 1. `ANTHROPIC_API_KEY` or `OPENCODE_API_KEY` environment variable
 2. `ANTHROPIC_AUTH_TOKEN` environment variable
 3. Claude Code OAuth credentials (`~/.claude/.credentials.json`)
-4. Kira credentials (`~/.kira/credentials.json`)
 
 If you're already authenticated with Claude Code, it just works. Decant reuses those credentials with automatic token refresh.
 
