@@ -3,13 +3,17 @@
 Priority:
   1. ANTHROPIC_API_KEY / OPENCODE_API_KEY env var
   2. ANTHROPIC_AUTH_TOKEN env var (OAuth)
-  3. ~/.claude/.credentials.json (Claude Code OAuth)
+  3. Claude Code OAuth credentials:
+     - macOS: macOS Keychain (service "Claude Code-credentials")
+     - Linux/other: ~/.claude/.credentials.json
 """
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -28,10 +32,37 @@ TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000  # 5 min before expiry
 # Required system prompt prefix for OAuth requests
 CLAUDE_CODE_SYSTEM_PROMPT = "You are Claude Code, Anthropic's official CLI for Claude."
 
+# macOS Keychain service names (current first, then legacy)
+_KEYCHAIN_SERVICE_NAMES = [
+    "Claude Code-credentials",
+    "Claude Code - credentials",
+    "Claude Code",
+]
 
-def _load_credentials() -> tuple[dict, str] | None:
-    """Load OAuth credentials from disk. Returns (creds, source) or None."""
-    # Try Claude Code credentials first
+
+def _load_keychain_credentials() -> tuple[dict, str] | None:
+    """Load credentials from macOS Keychain. Returns (creds, source) or None."""
+    for service in _KEYCHAIN_SERVICE_NAMES:
+        try:
+            result = subprocess.run(
+                ["security", "find-generic-password", "-s", service, "-w"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0:
+                continue
+            data = json.loads(result.stdout.strip())
+            if not isinstance(data, dict):
+                continue
+            oauth = data.get("claudeAiOauth")
+            if isinstance(oauth, dict) and oauth:
+                return oauth, "claude-code-keychain"
+        except (json.JSONDecodeError, subprocess.TimeoutExpired, OSError):
+            continue
+    return None
+
+
+def _load_file_credentials() -> tuple[dict, str] | None:
+    """Load credentials from ~/.claude/.credentials.json. Returns (creds, source) or None."""
     cc_path = Path.home() / ".claude" / ".credentials.json"
     if cc_path.exists():
         try:
@@ -40,12 +71,58 @@ def _load_credentials() -> tuple[dict, str] | None:
                 return oauth, "claude-code"
         except (json.JSONDecodeError, KeyError):
             pass
-
     return None
 
 
+def _load_credentials() -> tuple[dict, str] | None:
+    """Load OAuth credentials. Checks Keychain on macOS, file on Linux."""
+    if sys.platform == "darwin":
+        result = _load_keychain_credentials()
+        if result:
+            return result
+    return _load_file_credentials()
+
+
 def _save_credentials(creds: dict, source: str) -> None:
-    """Persist refreshed credentials back to disk."""
+    """Persist refreshed credentials back to their original store."""
+    if source == "claude-code-keychain":
+        _save_keychain_credentials(creds)
+    else:
+        _save_file_credentials(creds)
+
+
+def _save_keychain_credentials(creds: dict) -> None:
+    """Write refreshed credentials back to macOS Keychain."""
+    try:
+        service = _KEYCHAIN_SERVICE_NAMES[0]
+        existing = {}
+        try:
+            result = subprocess.run(
+                ["security", "find-generic-password", "-s", service, "-w"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout.strip())
+                if isinstance(data, dict):
+                    existing = data
+        except Exception:
+            pass
+
+        existing["claudeAiOauth"] = creds
+        payload = json.dumps(existing)
+
+        # -U updates in place if the item exists, creates if it doesn't
+        subprocess.run(
+            ["security", "add-generic-password", "-s", service,
+             "-a", os.getenv("USER", ""), "-w", payload, "-U"],
+            capture_output=True, text=True, timeout=5, check=True,
+        )
+    except Exception as e:
+        print(f"[decant] Warning: failed to save credentials to Keychain: {e}")
+
+
+def _save_file_credentials(creds: dict) -> None:
+    """Write refreshed credentials back to ~/.claude/.credentials.json."""
     try:
         path = Path.home() / ".claude" / ".credentials.json"
         existing = {}
