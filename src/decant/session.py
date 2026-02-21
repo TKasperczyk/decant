@@ -128,8 +128,32 @@ def find_session(session_id: str) -> Path | None:
     return None
 
 
-def list_sessions(project: str | None = None) -> list[SessionInfo]:
-    """List all sessions, optionally filtered by project name."""
+def cwd_project_dir() -> str | None:
+    """Return the Claude project directory name for the current working directory.
+
+    Claude Code maps ``/home/user/my-project`` to ``-home-user-my-project``
+    inside ``~/.claude/projects/``.  Returns *None* if the directory doesn't
+    exist (no sessions for the current cwd).
+    """
+    import os
+    cwd = os.getcwd()
+    dirname = cwd.replace("/", "-")
+    candidate = PROJECTS_DIR / dirname
+    return dirname if candidate.is_dir() else None
+
+
+def list_sessions(
+    project: str | None = None,
+    project_dir_name: str | None = None,
+) -> list[SessionInfo]:
+    """List all sessions, optionally filtered.
+
+    Args:
+        project: Substring match against project directory name (the old
+            ``--project`` / ``-p`` flag).
+        project_dir_name: Exact project directory name to match (used for
+            cwd-based filtering).
+    """
     sessions = []
     if not PROJECTS_DIR.exists():
         return sessions
@@ -138,6 +162,8 @@ def list_sessions(project: str | None = None) -> list[SessionInfo]:
         if not project_dir.is_dir():
             continue
 
+        if project_dir_name and project_dir.name != project_dir_name:
+            continue
         if project and project.lower() not in project_dir.name.lower():
             continue
 

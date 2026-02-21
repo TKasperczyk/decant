@@ -6,6 +6,7 @@ import argparse
 import sys
 
 from . import __version__
+from . import ui
 from .models import DEFAULT_MODEL, MODELS
 
 
@@ -23,26 +24,28 @@ def cmd_compact(args: argparse.Namespace) -> None:
     # Resolve session
     session_path = find_session(args.session)
     if not session_path:
-        print(f"Error: session '{args.session}' not found.", file=sys.stderr)
-        print("Use 'decant list' to see available sessions.", file=sys.stderr)
+        ui.error(f"session '{args.session}' not found.")
+        ui.hint("Use 'decant list' to see available sessions.")
         sys.exit(1)
 
-    print(f"Session: {session_path}")
     size_mb = session_path.stat().st_size / (1024 * 1024)
-    print(f"Size: {size_mb:.2f} MB")
 
     # Resolve model
     model_key = args.model or DEFAULT_MODEL
     model_id = MODELS.get(model_key)
     if not model_id:
-        print(f"Error: unknown model '{model_key}'. Choose from: {', '.join(MODELS)}", file=sys.stderr)
+        ui.error(f"unknown model '{model_key}'. Choose from: {', '.join(MODELS)}")
         sys.exit(1)
-
-    print(f"Model: {model_key} ({model_id})")
 
     # Load messages
     messages = load_messages(session_path)
-    print(f"Messages: {len(messages)}")
+
+    # Session info header
+    KW = 10
+    print(ui.kv("Session", ui.dim(str(session_path)), KW))
+    print(ui.kv("Size", f"{size_mb:.2f} MB", KW))
+    print(ui.kv("Model", f"{model_key} {ui.accent(f'({model_id})')}", KW))
+    print(ui.kv("Messages", f"{len(messages):,}", KW))
 
     # Create backup BEFORE any modifications (strip or compact)
     backup_path = None
@@ -56,14 +59,18 @@ def cmd_compact(args: argparse.Namespace) -> None:
     # Strip noise before boundary finding and summarization
     if args.strip and not args.dry_run:
         from .compactor import run_strip
-        print("\nStripping noise...")
+        print(f"\n  {ui.header('Stripping noise...')}")
         messages, strip_stats = run_strip(messages)
         saved_kb = strip_stats["saved_bytes"] / 1024
-        print(f"  Removed {strip_stats['removed_messages']} messages, "
-              f"saved {saved_kb:.1f} KB ({strip_stats['pct']:.1f}%)")
         for name, saved in strip_stats["breakdown"].items():
             if saved > 0:
-                print(f"    {name}: {saved / 1024:.1f} KB")
+                print(ui.bullet(f"{name:<24} {ui.dim(f'{saved / 1024:.1f} KB')}", indent=4))
+        pct_str = f"{strip_stats['pct']:.1f}%"
+        print(ui.bullet(
+            f"Removed {strip_stats['removed_messages']} messages, "
+            f"saved {saved_kb:.1f} KB {ui.dim(f'({pct_str})')}",
+            indent=4,
+        ))
         # Write stripped messages back so compact() reads clean data
         from .session import save_messages
         save_messages(session_path, messages, backup=False)
@@ -72,116 +79,146 @@ def cmd_compact(args: argparse.Namespace) -> None:
     try:
         client = None
         if args.topic:
-            print(f"\nFinding boundary for topic: '{args.topic}'...")
             client = create_client()
             exchanges = extract_exchanges(messages)
             if not exchanges:
-                print("Error: no conversational exchanges found in session.", file=sys.stderr)
+                ui.error("no conversational exchanges found in session.")
                 sys.exit(1)
-            print(f"  Extracted {len(exchanges)} exchanges")
-            boundary_uuid = find_boundary_by_topic(exchanges, args.topic, client, model_id)
+            print(f"\n  {ui.dim(f'Extracted {len(exchanges)} exchanges')}")
+            with ui.Spinner(f"Finding boundary for topic: {ui.accent(repr(args.topic))}") as sp:
+                boundary_uuid = find_boundary_by_topic(exchanges, args.topic, client, model_id)
             # Find the exchange for display
             for ex in exchanges:
                 if ex.uuid == boundary_uuid:
                     preview = ex.text[:80].replace("\n", " ")
-                    print(f"  Boundary: [{ex.role}] {preview}...")
+                    sp.done(f"[{ex.role}] {preview}{ui.sym.ellipsis}")
                     break
+            else:
+                sp.done()
         elif args.last is not None:
-            print(f"\nKeeping last {args.last} user turns...")
+            print(f"\n  Keeping last {ui.header(str(args.last))} user turns")
             boundary_uuid = find_boundary_by_count(messages, args.last)
             exchanges = extract_exchanges(messages)
             for ex in exchanges:
                 if ex.uuid == boundary_uuid:
                     preview = ex.text[:80].replace("\n", " ")
-                    print(f"  Boundary: [{ex.role}] {preview}...")
+                    print(f"  {ui.success(ui.sym.check)} Boundary: {ui.dim(f'[{ex.role}]')} {preview}{ui.sym.ellipsis}")
                     break
         else:
-            print("Error: specify --topic or --last.", file=sys.stderr)
+            ui.error("specify --topic or --last.")
             sys.exit(1)
     except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
+        ui.error(str(e))
         sys.exit(1)
     except RuntimeError as e:
-        print(f"Error: {e}", file=sys.stderr)
+        ui.error(str(e))
         sys.exit(1)
 
     # Summarize head
     try:
         if not args.dry_run:
-            print("\nSummarizing head section...")
             if not client:
                 client = create_client()
-            summary = summarize_head(messages, boundary_uuid, client, model_id)
-            print(f"  Summary: {len(summary)} chars")
+            with ui.Spinner("Summarizing head section") as sp:
+                summary = summarize_head(messages, boundary_uuid, client, model_id)
+            sp.done(f"{len(summary):,} chars")
 
             # Preview summary
-            print("\n--- Summary Preview ---")
-            # Show first 500 chars
+            print()
+            print(ui.titled_rule("Summary Preview"))
             preview = summary[:500]
             if len(summary) > 500:
-                preview += "\n..."
+                preview += f"\n{ui.dim(ui.sym.ellipsis)}"
             print(preview)
-            print("--- End Preview ---\n")
+            print(ui.rule())
+            print()
 
             # Compact
-            print("Compacting...")
-            stats = compact(
-                session_path,
-                boundary_uuid,
-                summary,
-                backup=False,  # Already created above
-            )
+            with ui.Spinner("Compacting session") as sp:
+                stats = compact(
+                    session_path,
+                    boundary_uuid,
+                    summary,
+                    backup=False,  # Already created above
+                )
+            sp.done()
 
-            print(f"\nDone.")
-            print(f"  Messages: {stats['original_messages']} -> {stats['final_messages']}")
+            # Completion stats
+            original_mb = stats["original_bytes"] / (1024 * 1024)
+            final_mb = stats["final_bytes"] / (1024 * 1024)
             saved_mb = stats["saved_bytes"] / (1024 * 1024)
             pct = (stats["saved_bytes"] / stats["original_bytes"] * 100) if stats["original_bytes"] > 0 else 0
-            print(f"  Size: {stats['original_bytes'] / (1024*1024):.2f} MB -> {stats['final_bytes'] / (1024*1024):.2f} MB ({saved_mb:.2f} MB saved, {pct:.1f}%)")
-            if backup_path:
-                print(f"  Backup: {backup_path}")
-        else:
-            print("\n[DRY RUN] Would summarize and compact here.")
-            print(f"  Boundary UUID: {boundary_uuid}")
 
-            # Show what would be removed vs kept
+            print(f"\n  {ui.success(ui.sym.check)} {ui.header('Done')}")
+            KR = 10
+            print(ui.kv("Messages", f"{stats['original_messages']:,} {ui.dim(ui.sym.arrow)} {stats['final_messages']:,}", KR))
+            print(ui.kv("Size",
+                f"{original_mb:.2f} MB {ui.dim(ui.sym.arrow)} {final_mb:.2f} MB  "
+                f"{ui.success(f'{saved_mb:.2f} MB saved')} {ui.dim(f'({pct:.1f}%)')}", KR))
+            if backup_path:
+                print(ui.kv("Backup", ui.dim(str(backup_path)), KR))
+        else:
+            # Dry run
+            print()
+            print(ui.titled_rule(ui.warn("Dry Run")))
+            print()
             from .session import collect_tail_uuids
             tail_uuids = collect_tail_uuids(messages, boundary_uuid)
             head_count = len(messages) - len(tail_uuids)
-            print(f"  Head (to summarize): ~{head_count} messages")
-            print(f"  Tail (to keep): ~{len(tail_uuids)} messages")
+            KD = 10
+            print(ui.kv("Boundary", ui.dim(boundary_uuid), KD))
+            print(ui.kv("Head", f"~{head_count:,} messages {ui.dim('(to summarize)')}", KD))
+            print(ui.kv("Tail", f"~{len(tail_uuids):,} messages {ui.dim('(to keep)')}", KD))
     except (ValueError, RuntimeError) as e:
-        print(f"Error: {e}", file=sys.stderr)
+        ui.error(str(e))
         sys.exit(1)
     except Exception as e:
-        print(f"Error (unexpected): {e}", file=sys.stderr)
+        ui.error(f"(unexpected) {e}")
         sys.exit(1)
 
 
 def cmd_list(args: argparse.Namespace) -> None:
     """List available sessions."""
-    from .session import list_sessions
+    from .session import cwd_project_dir, list_sessions
 
-    sessions = list_sessions(project=args.project)
+    # Default: show sessions for the current project (cwd).
+    # --all/-a: show everything.  --project/-p: substring filter.
+    if args.all:
+        sessions = list_sessions(project=args.project)
+    elif args.project:
+        sessions = list_sessions(project=args.project)
+    else:
+        cwd_dir = cwd_project_dir()
+        if cwd_dir:
+            sessions = list_sessions(project_dir_name=cwd_dir)
+        else:
+            sessions = []
+
     if not sessions:
-        print("No sessions found.")
+        if not args.all and not args.project:
+            ui.error("no sessions for this project.")
+            ui.hint("Use 'decant list --all' to list all sessions.")
+        else:
+            ui.error("no sessions found.")
         return
 
-    for s in sessions:
+    for i, s in enumerate(sessions):
         size_mb = s.path.stat().st_size / (1024 * 1024) if s.path.exists() else 0
         project = s.project_path or s.path.parent.name
-        # Truncate project path for display
         if len(project) > 40:
-            project = "..." + project[-37:]
+            project = ui.sym.ellipsis + project[-37:]
 
         summary = s.summary or s.first_prompt or "(no summary)"
         if len(summary) > 60:
-            summary = summary[:57] + "..."
+            summary = summary[:57] + ui.sym.ellipsis
 
         modified = s.modified[:10] if s.modified else "?"
         sid_short = s.session_id[:8]
 
-        print(f"  {sid_short}  {size_mb:6.2f}MB  {modified}  {project}")
-        print(f"           {summary}")
+        print(f"  {ui.dim(sid_short)}  {size_mb:5.1f} MB  {modified}  {ui.dim(project)}")
+        print(f"             {ui.dim(summary)}")
+        if i < len(sessions) - 1:
+            print()
 
 
 def cmd_show(args: argparse.Namespace) -> None:
@@ -190,21 +227,26 @@ def cmd_show(args: argparse.Namespace) -> None:
 
     session_path = find_session(args.session)
     if not session_path:
-        print(f"Error: session '{args.session}' not found.", file=sys.stderr)
+        ui.error(f"session '{args.session}' not found.")
         sys.exit(1)
 
     messages = load_messages(session_path)
     exchanges = extract_exchanges(messages)
 
-    print(f"Session: {session_path}")
-    print(f"Messages: {len(messages)} total, {len(exchanges)} exchanges\n")
+    print(ui.kv("Session", ui.dim(str(session_path)), 10))
+    print(f"             {ui.dim(f'{len(messages)} messages, {len(exchanges)} exchanges')}")
+    print()
+    print(ui.rule())
+    print()
 
     for i, ex in enumerate(exchanges):
-        prefix = "USER" if ex.role == "user" else "ASST"
+        role_str = ui.label("USER") if ex.role == "user" else ui.header("ASST")
         text = ex.text
         if len(text) > 200 and not args.full:
-            text = text[:200] + "..."
-        print(f"[{i+1}] {prefix} (uuid={ex.uuid[:8]}): {text}\n")
+            text = text[:200] + ui.sym.ellipsis
+        print(f"  {ui.header(f'#{i+1}')}  {role_str}  {ui.dim(ex.uuid[:8])}")
+        print(f"      {text}")
+        print()
 
 
 def main() -> None:
@@ -233,7 +275,9 @@ def main() -> None:
 
     # list
     p_list = sub.add_parser("list", help="List available sessions")
-    p_list.add_argument("--project", "-p", help="Filter by project name")
+    p_list.add_argument("--all", "-a", action="store_true",
+                         help="List sessions across all projects (default: current project only)")
+    p_list.add_argument("--project", "-p", help="Filter by project name substring")
 
     # show
     p_show = sub.add_parser("show", help="Show session exchanges")
