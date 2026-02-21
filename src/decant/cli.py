@@ -215,7 +215,7 @@ def cmd_list(args: argparse.Namespace) -> None:
         modified = s.modified[:10] if s.modified else "?"
         sid_short = s.session_id[:8]
 
-        print(f"  {ui.dim(sid_short)}  {size_mb:5.1f} MB  {modified}  {ui.dim(project)}")
+        print(f"  {ui.accent(sid_short)}  {size_mb:5.1f} MB  {modified}  {project}")
         print(f"             {ui.dim(summary)}")
         if i < len(sessions) - 1:
             print()
