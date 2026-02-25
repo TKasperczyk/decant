@@ -56,10 +56,12 @@ def cmd_compact(args: argparse.Namespace) -> None:
         backup_path = session_path.with_suffix(f".{ts}.jsonl.bak")
         shutil.copy2(session_path, backup_path)
 
-    # Strip noise before boundary finding and summarization
+    # Strip noise in-memory for cleaner boundary detection and summarization.
+    # Only affects the head section — compact() reads original messages from
+    # disk, so tail messages are preserved verbatim.
     if args.strip and not args.dry_run:
         from .compactor import run_strip
-        print(f"\n  {ui.header('Stripping noise...')}")
+        print(f"\n  {ui.header('Stripping noise (head only)...')}")
         messages, strip_stats = run_strip(messages)
         saved_kb = strip_stats["saved_bytes"] / 1024
         for name, saved in strip_stats["breakdown"].items():
@@ -71,9 +73,6 @@ def cmd_compact(args: argparse.Namespace) -> None:
             f"saved {saved_kb:.1f} KB {ui.dim(f'({pct_str})')}",
             indent=4,
         ))
-        # Write stripped messages back so compact() reads clean data
-        from .session import save_messages
-        save_messages(session_path, messages, backup=False)
 
     # Find boundary
     try:
@@ -267,7 +266,7 @@ def main() -> None:
     p_compact.add_argument("--model", "-m", choices=list(MODELS.keys()), default=DEFAULT_MODEL,
                            help=f"Model for summarization (default: {DEFAULT_MODEL})")
     p_compact.add_argument("--strip", "-s", action="store_true",
-                           help="Strip noise (progress ticks, thinking blocks, metadata, oversized tool output) before compaction")
+                           help="Strip noise (progress ticks, thinking blocks, metadata, oversized tool output) from head section before summarization; tail messages are preserved verbatim")
     p_compact.add_argument("--dry-run", "-n", action="store_true",
                            help="Preview what would be compacted without making changes")
     p_compact.add_argument("--no-backup", action="store_true",
