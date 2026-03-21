@@ -1,14 +1,69 @@
+# Nix
+result
+result-*
+
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.pyc
-*.pyo
-*.egg-info/
-dist/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
 build/
+develop-eggs/
+dist/
+downloads/
+eggs/
 .eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
 *.egg
-.venv/
-venv/
+MANIFEST
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Environments
 .env
-*.bak
-AGENTS.md
-CLAUDE.md
+.venv
+env/
+venv/
+ENV/
+.devenv/
+.direnv
+.direnv/*
+.devenv.flake.nix
+devenv.lock
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# PyCharm / IDE
+.idea/
+.vscode/
+
+# misc
+**/**.bak
